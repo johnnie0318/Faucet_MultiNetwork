@@ -237,7 +237,7 @@ pub struct RequestFaucet<'info> {
 }
 
 pub const TX_FEE: u64 = 10000;
-pub const DAY_TIME: i64 = 60; //86400;
+pub const DAY_TIME: i64 = 86400;
 pub const GLOBAL_STATE_SEED: &[u8] = b"global-state";
 pub const VAULT_WALLET_SEED: &[u8] = b"vault-wallet";
 pub const USER_POOL_SEED: &[u8] = b"user-pool";
