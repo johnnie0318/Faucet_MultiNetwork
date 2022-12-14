@@ -2,7 +2,8 @@ import { PublicKey } from "@solana/web3.js";
 
 export type Option<T> = T | undefined;
 
-export const DAY_TIME = 60; //86400;
+export const DAY_TIME = 86400;
+export const DEFAULT_MAX_PER_DAY = 0.00001 * 1e9;
 
 export const GLOBAL_STATE_SEED = "global-state";
 export const USER_POOL_SEED = "user-pool";

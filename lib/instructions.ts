@@ -138,7 +138,7 @@ export const createInitUserPoolIx = async (
 export const createRequestFaucetIx = async (
   userAddress: PublicKey,
   amount: number,
-  program: anchor.Program,
+  program: anchor.Program
 ) => {
   const [globalStateKey] = await getPDA(program.programId, [GLOBAL_STATE_SEED]);
   const [vaultWalletKey] = await getPDA(program.programId, [VAULT_WALLET_SEED]);
