@@ -1,18 +1,32 @@
 use anchor_lang::prelude::*;
 use solana_program::{ program::{ invoke_signed, invoke } };
 
-declare_id!("Fg6PaFpoGXkYsidMpWTK6W2BeZ7FEfcYkg476zPFsLnS");
+declare_id!("9r8MYFtBHo7FkBpiD9KW3ddoJEiYNPuqGzDnU1nJpgAC");
 
 #[program]
 pub mod solana_faucet {
     use super::*;
 
-    pub fn initialize(ctx: Context<Initialize>, vault_wallet_bump: u8) -> Result<()> {
+    pub fn initialize(
+        ctx: Context<Initialize>,
+        max_amount: u64,
+        vault_wallet_bump: u8
+    ) -> Result<()> {
         let global_state = &mut ctx.accounts.global_state;
 
         // save admin
         global_state.admin = ctx.accounts.admin.key();
+        global_state.max_amount_per_day = max_amount;
         global_state.vault_wallet_bump = vault_wallet_bump;
+
+        Ok(())
+    }
+
+    pub fn update_limit(ctx: Context<UpdateLimit>, max_amount: u64) -> Result<()> {
+        let global_state = &mut ctx.accounts.global_state;
+        require!(ctx.accounts.admin.key().eq(&global_state.admin), ErrorCode::InvalidAdmin);
+
+        global_state.max_amount_per_day = max_amount;
 
         Ok(())
     }
@@ -50,7 +64,7 @@ pub mod solana_faucet {
             ctx.accounts.admin.to_account_info(),
             ctx.accounts.system_program.to_account_info(),
             &[seeds],
-            amount,
+            amount
         )?;
 
         Ok(())
@@ -72,12 +86,8 @@ pub mod solana_faucet {
     pub fn request_faucet(ctx: Context<RequestFaucet>, amount: u64) -> Result<()> {
         let global_state = &ctx.accounts.global_state;
         let user_pool = &mut ctx.accounts.user_pool;
-        
-        require!(ctx.accounts.payer.key().eq(&user_pool.owner), ErrorCode::InvalidUserPDA);
 
-        if !has_balance(&ctx.accounts.rent, &ctx.accounts.vault_wallet, amount)? {
-            return Err(ErrorCode::InsufficientBalance.into());
-        }
+        require!(ctx.accounts.payer.key().eq(&user_pool.owner), ErrorCode::InvalidUserPDA);
 
         let timestamp = Clock::get()?.unix_timestamp;
         let period: i64 = timestamp.checked_sub(user_pool.request_time).unwrap();
@@ -88,7 +98,14 @@ pub mod solana_faucet {
             user_pool.received_amount = amount;
         } else {
             user_pool.received_amount += amount;
-            require!(user_pool.received_amount <= global_state.max_amount_per_day, ErrorCode::RequestTooManyFunds);
+            require!(
+                user_pool.received_amount <= global_state.max_amount_per_day,
+                ErrorCode::RequestTooManyFunds
+            );
+        }
+
+        if !has_balance(&ctx.accounts.rent, &ctx.accounts.vault_wallet, amount)? {
+            return Err(ErrorCode::InsufficientBalance.into());
         }
 
         let seeds = &[VAULT_WALLET_SEED, &[global_state.vault_wallet_bump]];
@@ -98,7 +115,7 @@ pub mod solana_faucet {
             ctx.accounts.payer.to_account_info(),
             ctx.accounts.system_program.to_account_info(),
             &[seeds],
-            amount,
+            amount
         )?;
 
         Ok(())
@@ -114,14 +131,14 @@ pub struct Initialize<'info> {
     #[account(
         init,
         seeds = [GLOBAL_STATE_SEED.as_ref()],
-        space = GlobalPool::LEN,
+        space = GlobalState::LEN,
         bump,
         payer = admin
     )]
-    pub global_state: Account<'info, GlobalPool>,
+    pub global_state: Account<'info, GlobalState>,
 
     /// CHECK: This account is not unsafe because using as vault account
-    #[account(seeds = [VAULT_WALLET_SEED.as_ref()], bump = vault_wallet_bump)]
+    #[account(seeds = [VAULT_WALLET_SEED.as_ref()], bump)]
     pub vault_wallet: AccountInfo<'info>,
 
     pub system_program: Program<'info, System>,
@@ -130,15 +147,26 @@ pub struct Initialize<'info> {
 
 #[derive(Accounts)]
 #[instruction()]
-pub struct DepositVault<'info> {
+pub struct UpdateLimit<'info> {
     #[account(mut)]
     pub admin: Signer<'info>,
 
     #[account(
+        mut,
         seeds = [GLOBAL_STATE_SEED.as_ref()],
         bump,
     )]
-    pub global_state: Account<'info, GlobalPool>,
+    pub global_state: Account<'info, GlobalState>,
+}
+
+#[derive(Accounts)]
+#[instruction()]
+pub struct DepositVault<'info> {
+    #[account(mut)]
+    pub admin: Signer<'info>,
+
+    #[account(seeds = [GLOBAL_STATE_SEED.as_ref()], bump)]
+    pub global_state: Account<'info, GlobalState>,
 
     /// CHECK: This account is not unsafe because using as vault account
     #[account(mut, seeds = [VAULT_WALLET_SEED.as_ref()], bump)]
@@ -154,11 +182,8 @@ pub struct WithdrawVault<'info> {
     #[account(mut)]
     pub admin: Signer<'info>,
 
-    #[account(
-        seeds = [GLOBAL_STATE_SEED.as_ref()],
-        bump,
-    )]
-    pub global_state: Account<'info, GlobalPool>,
+    #[account(seeds = [GLOBAL_STATE_SEED.as_ref()], bump)]
+    pub global_state: Account<'info, GlobalState>,
 
     /// CHECK: This account is not unsafe because using as vault account
     #[account(mut, seeds = [VAULT_WALLET_SEED.as_ref()], bump)]
@@ -193,11 +218,8 @@ pub struct RequestFaucet<'info> {
     #[account(mut)]
     pub payer: Signer<'info>,
 
-    #[account(
-        seeds = [GLOBAL_STATE_SEED.as_ref()],
-        bump,
-    )]
-    pub global_state: Account<'info, GlobalPool>,
+    #[account(seeds = [GLOBAL_STATE_SEED.as_ref()], bump)]
+    pub global_state: Account<'info, GlobalState>,
 
     /// CHECK: This account is not unsafe because using as vault account
     #[account(mut, seeds = [VAULT_WALLET_SEED.as_ref()], bump)]
@@ -215,20 +237,20 @@ pub struct RequestFaucet<'info> {
 }
 
 pub const TX_FEE: u64 = 10000;
-pub const DAY_TIME: i64 = 86400;
-pub const GLOBAL_STATE_SEED: &[u8] = b"global-authority";
+pub const DAY_TIME: i64 = 60; //86400;
+pub const GLOBAL_STATE_SEED: &[u8] = b"global-state";
 pub const VAULT_WALLET_SEED: &[u8] = b"vault-wallet";
 pub const USER_POOL_SEED: &[u8] = b"user-pool";
 
 #[account]
 #[derive(Default)]
-pub struct GlobalPool {
+pub struct GlobalState {
     pub admin: Pubkey, // 32
     pub max_amount_per_day: u64, // 8
     pub vault_wallet_bump: u8, // 1
 }
 
-impl GlobalPool {
+impl GlobalState {
     pub const LEN: usize = 8 + 32 + 8 + 1;
 }
 
